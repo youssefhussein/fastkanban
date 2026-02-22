@@ -1,234 +1,549 @@
 "use client";
 
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { api } from "../convex/_generated/api";
-import Link from "next/link";
 import { useAuthActions } from "@convex-dev/auth/react";
+import { useMutation, useQuery } from "convex/react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
+import { useEffect, useMemo, useState } from "react";
+import BoardToolbar from "@/components/kanban/BoardToolbar";
+import CardEditorDialog from "@/components/kanban/CardEditorDialog";
+import ColumnEditorDialog from "@/components/kanban/ColumnEditorDialog";
+import KanbanBoard from "@/components/kanban/KanbanBoard";
+import { Button } from "@/components/ui/button";
+import { Marquee } from "@/components/ui/marquee";
+import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
+import type { CardDoc, CardDraft, ColumnDoc, SortMode } from "@/components/kanban/types";
+
+const EMPTY_DRAFT: CardDraft = {
+  title: "",
+  description: "",
+  priority: "unknown",
+};
+
+const PRIORITY_RANK: Record<CardDoc["priority"], number> = {
+  high: 0,
+  medium: 1,
+  low: 2,
+  unknown: 3,
+};
+
+type ProjectDialogState = {
+  open: boolean;
+  mode: "create" | "rename";
+  initialValue: string;
+};
+
+type ColumnDialogState = {
+  open: boolean;
+  mode: "create" | "rename";
+  columnId: Id<"columns"> | null;
+  initialValue: string;
+};
+
+type CardDialogState = {
+  open: boolean;
+  mode: "create" | "edit";
+  cardId: Id<"cards"> | null;
+  columnId: Id<"columns"> | null;
+  initialValue: CardDraft;
+};
+
+const CLOSED_PROJECT_DIALOG: ProjectDialogState = {
+  open: false,
+  mode: "create",
+  initialValue: "",
+};
+
+const CLOSED_COLUMN_DIALOG: ColumnDialogState = {
+  open: false,
+  mode: "create",
+  columnId: null,
+  initialValue: "",
+};
+
+const CLOSED_CARD_DIALOG: CardDialogState = {
+  open: false,
+  mode: "create",
+  cardId: null,
+  columnId: null,
+  initialValue: EMPTY_DRAFT,
+};
+
+const THEME_STORAGE_KEY = "fastkanban-theme";
 
 export default function Home() {
-  return (
-    <>
-      <header className="sticky top-0 z-10 bg-background/80 backdrop-blur-md p-4 border-b border-slate-200 dark:border-slate-700 flex flex-row justify-between items-center shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-3">
-            <Image src="/convex.svg" alt="Convex Logo" width={32} height={32} />
-            <div className="w-px h-8 bg-slate-300 dark:bg-slate-600"></div>
-            <Image
-              src="/nextjs-icon-light-background.svg"
-              alt="Next.js Logo"
-              width={32}
-              height={32}
-              className="dark:hidden"
-            />
-            <Image
-              src="/nextjs-icon-dark-background.svg"
-              alt="Next.js Logo"
-              width={32}
-              height={32}
-              className="hidden dark:block"
-            />
-          </div>
-          <h1 className="font-semibold text-slate-800 dark:text-slate-200">
-            Convex + Next.js + Convex Auth
-          </h1>
-        </div>
-        <SignOutButton />
-      </header>
-      <main className="p-8 flex flex-col gap-8">
-        <Content />
-      </main>
-    </>
-  );
-}
-
-function SignOutButton() {
-  const { isAuthenticated } = useConvexAuth();
-  const { signOut } = useAuthActions();
   const router = useRouter();
-  return (
-    <>
-      {isAuthenticated && (
-        <button
-          className="bg-slate-600 hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 shadow-sm hover:shadow-md cursor-pointer"
-          onClick={() =>
-            void signOut().then(() => {
-              router.push("/signin");
-            })
-          }
-        >
-          Sign out
-        </button>
-      )}
-    </>
+  const { signOut } = useAuthActions();
+
+  const projects = useQuery(api.projects.listMyProjects);
+  const [selectedProjectId, setSelectedProjectId] = useState<Id<"projects"> | null>(null);
+  const [sortMode, setSortMode] = useState<SortMode>("manual");
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (savedTheme === "dark") {
+      return true;
+    }
+    if (savedTheme === "light") {
+      return false;
+    }
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [projectDialog, setProjectDialog] =
+    useState<ProjectDialogState>(CLOSED_PROJECT_DIALOG);
+  const [columnDialog, setColumnDialog] = useState<ColumnDialogState>(CLOSED_COLUMN_DIALOG);
+  const [cardDialog, setCardDialog] = useState<CardDialogState>(CLOSED_CARD_DIALOG);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const createProject = useMutation(api.projects.createProject);
+  const renameProject = useMutation(api.projects.renameProject);
+  const setAutoReset = useMutation(api.projects.setAutoReset);
+  const triggerResetNow = useMutation(api.projects.triggerResetNow);
+
+  const createColumn = useMutation(api.columns.createColumn);
+  const renameColumn = useMutation(api.columns.renameColumn);
+  const deleteColumn = useMutation(api.columns.deleteColumn);
+
+  const createCard = useMutation(api.cards.createCard);
+  const updateCard = useMutation(api.cards.updateCard);
+  const moveCard = useMutation(api.cards.moveCard);
+  const deleteCard = useMutation(api.cards.deleteCard);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", isDarkMode);
+    window.localStorage.setItem(THEME_STORAGE_KEY, isDarkMode ? "dark" : "light");
+  }, [isDarkMode]);
+
+  const effectiveProjectId = useMemo(() => {
+    if (projects === undefined || projects.length === 0) {
+      return null;
+    }
+    if (selectedProjectId === null) {
+      return projects[0]._id;
+    }
+    return projects.some((project) => project._id === selectedProjectId)
+      ? selectedProjectId
+      : projects[0]._id;
+  }, [projects, selectedProjectId]);
+
+  const selectedProject = useMemo(
+    () => projects?.find((project) => project._id === effectiveProjectId) ?? null,
+    [effectiveProjectId, projects],
   );
-}
 
-function Content() {
-  const { viewer, numbers } =
-    useQuery(api.myFunctions.listNumbers, {
-      count: 10,
-    }) ?? {};
-  const addNumber = useMutation(api.myFunctions.addNumber);
+  const columns = useQuery(
+    api.columns.listColumns,
+    effectiveProjectId === null ? "skip" : { projectId: effectiveProjectId },
+  );
 
-  if (viewer === undefined || numbers === undefined) {
+  const cards = useQuery(
+    api.cards.listBoardCards,
+    effectiveProjectId === null ? "skip" : { projectId: effectiveProjectId },
+  );
+
+  const cardById = useMemo(() => {
+    const mapping = new Map<CardDoc["_id"], CardDoc>();
+    if (cards === undefined) {
+      return mapping;
+    }
+
+    for (const card of cards) {
+      mapping.set(card._id, card);
+    }
+
+    return mapping;
+  }, [cards]);
+
+  const manualCardsByColumnId = useMemo(() => {
+    const grouped: Record<string, Array<CardDoc>> = {};
+    if (columns === undefined || cards === undefined) {
+      return grouped;
+    }
+
+    for (const column of columns) {
+      grouped[column._id] = [];
+    }
+
+    for (const card of cards) {
+      const bucket = grouped[card.columnId] ?? [];
+      bucket.push(card);
+      grouped[card.columnId] = bucket;
+    }
+
+    for (const bucket of Object.values(grouped)) {
+      bucket.sort((a, b) => {
+        if (a.position !== b.position) {
+          return a.position - b.position;
+        }
+        return a._creationTime - b._creationTime;
+      });
+    }
+
+    return grouped;
+  }, [cards, columns]);
+
+  const cardsByColumnId = useMemo(() => {
+    if (sortMode === "manual") {
+      return manualCardsByColumnId;
+    }
+
+    const reordered: Record<string, Array<CardDoc>> = {};
+    for (const [columnId, bucket] of Object.entries(manualCardsByColumnId)) {
+      reordered[columnId] = [...bucket].sort((a, b) => {
+        const priorityGap = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
+        if (priorityGap !== 0) {
+          return priorityGap;
+        }
+        if (a.position !== b.position) {
+          return a.position - b.position;
+        }
+        return a._creationTime - b._creationTime;
+      });
+    }
+
+    return reordered;
+  }, [manualCardsByColumnId, sortMode]);
+
+  const runAction = async (action: () => Promise<void>): Promise<void> => {
+    setErrorMessage(null);
+    try {
+      await action();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Action failed.";
+      setErrorMessage(message);
+    }
+  };
+
+  const handleProjectSubmit = async (name: string): Promise<void> => {
+    if (projectDialog.mode === "create") {
+      await runAction(async () => {
+        const result = await createProject({ name });
+        setSelectedProjectId(result.projectId);
+      });
+      return;
+    }
+
+    if (selectedProject === null) {
+      return;
+    }
+
+    await runAction(async () => {
+      await renameProject({ projectId: selectedProject._id, name });
+    });
+  };
+
+  const handleDropCard = async (
+    cardId: CardDoc["_id"],
+    toColumnId: ColumnDoc["_id"],
+  ): Promise<void> => {
+    const card = cardById.get(cardId);
+    if (card === undefined) {
+      return;
+    }
+
+    const targetCards = manualCardsByColumnId[toColumnId] ?? [];
+    let destination = targetCards.length;
+
+    if (card.columnId === toColumnId) {
+      const currentIndex = targetCards.findIndex((entry) => entry._id === card._id);
+      if (currentIndex < 0) {
+        return;
+      }
+
+      destination = Math.max(0, targetCards.length - 1);
+      if (destination === currentIndex) {
+        return;
+      }
+    }
+
+    await runAction(async () => {
+      await moveCard({
+        cardId,
+        toColumnId,
+        toPosition: destination,
+      });
+    });
+  };
+
+  const handleSignOut = () => {
+    void signOut().then(() => {
+      router.push("/signin");
+    });
+  };
+
+  if (projects === undefined) {
     return (
-      <div className="mx-auto">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"></div>
-          <div
-            className="w-2 h-2 bg-slate-500 rounded-full animate-bounce"
-            style={{ animationDelay: "0.1s" }}
-          ></div>
-          <div
-            className="w-2 h-2 bg-slate-600 rounded-full animate-bounce"
-            style={{ animationDelay: "0.2s" }}
-          ></div>
-          <p className="ml-2 text-slate-600 dark:text-slate-400">Loading...</p>
-        </div>
-      </div>
+      <main className="flex min-h-screen items-center justify-center bg-[#f8f3e7] text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+        <p className="animate-pulse text-sm font-black uppercase tracking-[0.2em] text-zinc-700 dark:text-zinc-300">
+          Loading workspace...
+        </p>
+      </main>
     );
   }
 
   return (
-    <div className="flex flex-col gap-4 max-w-lg mx-auto">
-      <div>
-        <h2 className="font-bold text-xl text-slate-800 dark:text-slate-200">
-          Welcome {viewer ?? "Anonymous"}!
-        </h2>
-        <p className="text-slate-600 dark:text-slate-400 mt-2">
-          You are signed into a demo application using Convex Auth.
-        </p>
-        <p className="text-slate-600 dark:text-slate-400 mt-1">
-          This app can generate random numbers and store them in your Convex
-          database.
-        </p>
-      </div>
-
-      <div className="h-px bg-slate-200 dark:bg-slate-700"></div>
-
-      <div className="flex flex-col gap-4">
-        <h2 className="font-semibold text-xl text-slate-800 dark:text-slate-200">
-          Number generator
-        </h2>
-        <p className="text-slate-600 dark:text-slate-400 text-sm">
-          Click the button below to generate a new number. The data is persisted
-          in the Convex cloud database - open this page in another window and
-          see the data sync automatically!
-        </p>
-        <button
-          className="bg-slate-700 hover:bg-slate-800 dark:bg-slate-600 dark:hover:bg-slate-500 text-white text-sm font-medium px-6 py-3 rounded-lg cursor-pointer transition-all duration-200 shadow-md hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]"
-          onClick={() => {
-            void addNumber({ value: Math.floor(Math.random() * 10) });
-          }}
-        >
-          + Generate random number
-        </button>
-        <div className="bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl p-4 shadow-sm">
-          <p className="font-semibold text-slate-800 dark:text-slate-200 mb-2">
-            Newest Numbers
-          </p>
-          <p className="text-slate-700 dark:text-slate-300 font-mono text-lg">
-            {numbers?.length === 0
-              ? "Click the button to generate a number!"
-              : (numbers?.join(", ") ?? "...")}
-          </p>
-        </div>
-      </div>
-
-      <div className="h-px bg-slate-200 dark:bg-slate-700"></div>
-
-      <div className="flex flex-col gap-4">
-        <h2 className="font-semibold text-xl text-slate-800 dark:text-slate-200">
-          Making changes
-        </h2>
-        <p className="text-slate-600 dark:text-slate-400 text-sm">
-          Edit{" "}
-          <code className="text-sm font-semibold font-mono bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded-md border border-slate-300 dark:border-slate-600">
-            convex/myFunctions.ts
-          </code>{" "}
-          to change the backend.
-        </p>
-        <p className="text-slate-600 dark:text-slate-400 text-sm">
-          Edit{" "}
-          <code className="text-sm font-semibold font-mono bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded-md border border-slate-300 dark:border-slate-600">
-            app/page.tsx
-          </code>{" "}
-          to change the frontend.
-        </p>
-        <p className="text-slate-600 dark:text-slate-400 text-sm">
-          See the{" "}
-          <Link
-            href="/server"
-            className="text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 font-medium underline decoration-2 underline-offset-2 transition-colors"
-          >
-            /server route
-          </Link>{" "}
-          for an example of loading data in a server component
-        </p>
-      </div>
-
-      <div className="h-px bg-slate-200 dark:bg-slate-700"></div>
-
-      <div className="flex flex-col gap-4">
-        <h2 className="text-xl font-bold text-slate-800 dark:text-slate-200">
-          Useful resources
-        </h2>
-        <div className="flex gap-4">
-          <div className="flex flex-col gap-4 w-1/2">
-            <ResourceCard
-              title="Convex docs"
-              description="Read comprehensive documentation for all Convex features."
-              href="https://docs.convex.dev/home"
-            />
-            <ResourceCard
-              title="Stack articles"
-              description="Learn about best practices, use cases, and more from a growing
-            collection of articles, videos, and walkthroughs."
-              href="https://stack.convex.dev"
-            />
+    <main className="min-h-screen bg-[#f8f3e7] text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+      <div className="pointer-events-none fixed inset-0 opacity-40 [background:repeating-linear-gradient(-45deg,transparent,transparent_14px,rgba(24,24,27,.08)_14px,rgba(24,24,27,.08)_16px)] dark:opacity-20" />
+      <div className="relative mx-auto flex w-full max-w-[96rem] flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
+        <header className="rounded-2xl border-2 border-zinc-950 bg-lime-100 p-5 shadow-[8px_8px_0_0_#09090b] dark:bg-zinc-900">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.25em] text-zinc-700 dark:text-zinc-300">
+                Fast Kanban
+              </p>
+              <h1 className="mt-1 text-3xl font-black text-zinc-900 dark:text-zinc-100">Task Arena</h1>
+              <p className="mt-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                Drop a card anywhere on a column to move it. Sort mode only changes visual ordering.
+              </p>
+            </div>
+            {projects.length === 0 && (
+              <Button variant="outline" onClick={handleSignOut}>
+                Sign out
+              </Button>
+            )}
           </div>
-          <div className="flex flex-col gap-4 w-1/2">
-            <ResourceCard
-              title="Templates"
-              description="Browse our collection of templates to get started quickly."
-              href="https://www.convex.dev/templates"
-            />
-            <ResourceCard
-              title="Discord"
-              description="Join our developer community to ask questions, trade tips & tricks,
-            and show off your projects."
-              href="https://www.convex.dev/community"
-            />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+        </header>
 
-function ResourceCard({
-  title,
-  description,
-  href,
-}: {
-  title: string;
-  description: string;
-  href: string;
-}) {
-  return (
-    <a
-      href={href}
-      className="flex flex-col gap-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 p-5 rounded-xl h-36 overflow-auto border border-slate-300 dark:border-slate-600 hover:border-slate-400 dark:hover:border-slate-500 shadow-sm hover:shadow-md transition-all duration-200 hover:scale-[1.02] group cursor-pointer"
-      target="_blank"
-    >
-      <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-slate-100 transition-colors">
-        {title} →
-      </h3>
-      <p className="text-xs text-slate-600 dark:text-slate-400">
-        {description}
-      </p>
-    </a>
+        {/*<Marquee
+          items={[
+            "Drop Anywhere In Column",
+            "Drag Works In Both Sort Modes",
+            "Priority = Reordered View",
+            "Backlog And Done Always Present",
+          ]}
+        />*/}
+
+        {projects.length === 0 ? (
+          <section className="rounded-2xl border-2 border-zinc-950 bg-white p-10 text-center shadow-[8px_8px_0_0_#09090b] dark:bg-zinc-900">
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-zinc-700 dark:text-zinc-300">
+              No projects yet
+            </p>
+            <h2 className="mt-2 text-2xl font-black text-zinc-900 dark:text-zinc-100">
+              Create your first board
+            </h2>
+            <p className="mt-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              Every project starts with Backlog, TODO, In-Progress, and Done.
+            </p>
+            <Button
+              onClick={() =>
+                setProjectDialog({
+                  open: true,
+                  mode: "create",
+                  initialValue: "",
+                })
+              }
+              className="mt-5"
+            >
+              New Project
+            </Button>
+          </section>
+        ) : (
+          <div className="grid items-start gap-4 lg:grid-cols-[auto_minmax(0,1fr)]">
+            {selectedProject !== null && (
+              <aside className="lg:sticky lg:top-4">
+                <BoardToolbar
+                  projects={projects}
+                  selectedProjectId={effectiveProjectId}
+                  onSelectProject={setSelectedProjectId}
+                  onCreateProject={() =>
+                    setProjectDialog({
+                      open: true,
+                      mode: "create",
+                      initialValue: "",
+                    })
+                  }
+                  onRenameProject={() => {
+                    if (selectedProject === null) {
+                      return;
+                    }
+                    setProjectDialog({
+                      open: true,
+                      mode: "rename",
+                      initialValue: selectedProject.name,
+                    });
+                  }}
+                  project={selectedProject}
+                  sortMode={sortMode}
+                  onSortModeChange={setSortMode}
+                  onAddColumn={() =>
+                    setColumnDialog({
+                      open: true,
+                      mode: "create",
+                      columnId: null,
+                      initialValue: "",
+                    })
+                  }
+                  onToggleAutoReset={async () => {
+                    await runAction(async () => {
+                      await setAutoReset({
+                        projectId: selectedProject._id,
+                        enabled: !selectedProject.autoResetEnabled,
+                      });
+                    });
+                  }}
+                  onCleanNow={async () => {
+                    await runAction(async () => {
+                      await triggerResetNow({ projectId: selectedProject._id });
+                    });
+                  }}
+                  sidebarCollapsed={sidebarCollapsed}
+                  onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+                  darkMode={isDarkMode}
+                  onToggleDarkMode={() => setIsDarkMode((current) => !current)}
+                  onSignOut={handleSignOut}
+                />
+              </aside>
+            )}
+
+            <section className="min-w-0 space-y-4">
+              {selectedProject !== null && columns !== undefined && cards !== undefined ? (
+                <>
+                  {sortMode !== "manual" && (
+                    <section className="rounded-xl border-2 border-zinc-950 bg-amber-100 px-4 py-3 text-sm font-semibold text-zinc-800 shadow-[4px_4px_0_0_#09090b] dark:bg-zinc-900 dark:text-zinc-200">
+                      Priority mode changes ordering only. Drag and drop is still enabled.
+                    </section>
+                  )}
+
+                  <KanbanBoard
+                    columns={columns}
+                    cardsByColumnId={cardsByColumnId}
+                    dragEnabled={true}
+                    onAddCard={(columnId) =>
+                      setCardDialog({
+                        open: true,
+                        mode: "create",
+                        cardId: null,
+                        columnId,
+                        initialValue: EMPTY_DRAFT,
+                      })
+                    }
+                    onEditColumn={(column: ColumnDoc) => {
+                      if (!column.isDeletable) {
+                        return;
+                      }
+                      setColumnDialog({
+                        open: true,
+                        mode: "rename",
+                        columnId: column._id,
+                        initialValue: column.name,
+                      });
+                    }}
+                    onDeleteColumn={async (column: ColumnDoc) => {
+                      await runAction(async () => {
+                        await deleteColumn({ columnId: column._id });
+                      });
+                    }}
+                    onEditCard={(card: CardDoc) =>
+                      setCardDialog({
+                        open: true,
+                        mode: "edit",
+                        cardId: card._id,
+                        columnId: card.columnId,
+                        initialValue: {
+                          title: card.title,
+                          description: card.description,
+                          priority: card.priority,
+                        },
+                      })
+                    }
+                    onDeleteCard={async (cardId) => {
+                      await runAction(async () => {
+                        await deleteCard({ cardId });
+                      });
+                    }}
+                    onDropCard={handleDropCard}
+                  />
+                </>
+              ) : (
+                <section className="rounded-2xl border-2 border-zinc-950 bg-white p-8 text-center text-sm font-semibold text-zinc-700 shadow-[6px_6px_0_0_#09090b] dark:bg-zinc-900 dark:text-zinc-300">
+                  Loading board...
+                </section>
+              )}
+            </section>
+          </div>
+        )}
+
+        {errorMessage !== null && (
+          <div className="rounded-xl border-2 border-zinc-950 bg-rose-200 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-[4px_4px_0_0_#09090b] dark:bg-rose-900 dark:text-rose-100">
+            {errorMessage}
+          </div>
+        )}
+      </div>
+
+      <ColumnEditorDialog
+        open={projectDialog.open}
+        title={projectDialog.mode === "create" ? "Create Project" : "Rename Project"}
+        submitLabel={projectDialog.mode === "create" ? "Create" : "Save"}
+        initialValue={projectDialog.initialValue}
+        onClose={() => setProjectDialog(CLOSED_PROJECT_DIALOG)}
+        onSubmit={handleProjectSubmit}
+      />
+
+      <ColumnEditorDialog
+        open={columnDialog.open}
+        title={columnDialog.mode === "create" ? "Add Column" : "Rename Column"}
+        submitLabel={columnDialog.mode === "create" ? "Create" : "Save"}
+        initialValue={columnDialog.initialValue}
+        onClose={() => setColumnDialog(CLOSED_COLUMN_DIALOG)}
+        onSubmit={async (name) => {
+          if (effectiveProjectId === null) {
+            return;
+          }
+          if (columnDialog.mode === "create") {
+            await runAction(async () => {
+              await createColumn({ projectId: effectiveProjectId, name });
+            });
+            return;
+          }
+          const columnId = columnDialog.columnId;
+          if (columnId === null) {
+            return;
+          }
+          await runAction(async () => {
+            await renameColumn({ columnId, name });
+          });
+        }}
+      />
+
+      <CardEditorDialog
+        open={cardDialog.open}
+        title={cardDialog.mode === "create" ? "Create Card" : "Edit Card"}
+        submitLabel={cardDialog.mode === "create" ? "Create" : "Save"}
+        initialValue={cardDialog.initialValue}
+        onClose={() => setCardDialog(CLOSED_CARD_DIALOG)}
+        onSubmit={async (draft) => {
+          if (effectiveProjectId === null) {
+            return;
+          }
+          if (cardDialog.mode === "create") {
+            await runAction(async () => {
+              await createCard({
+                projectId: effectiveProjectId,
+                columnId: cardDialog.columnId ?? undefined,
+                title: draft.title,
+                description: draft.description,
+                priority: draft.priority,
+              });
+            });
+            return;
+          }
+          if (cardDialog.cardId === null) {
+            return;
+          }
+          const cardId = cardDialog.cardId;
+          await runAction(async () => {
+            await updateCard({
+              cardId,
+              title: draft.title,
+              description: draft.description,
+              priority: draft.priority,
+            });
+          });
+        }}
+      />
+    </main>
   );
 }

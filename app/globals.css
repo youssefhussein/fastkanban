@@ -48,6 +48,10 @@
 }
 
 :root {
+  --font-geist-sans: "Trebuchet MS", "Avenir Next", "Gill Sans", "Noto Sans",
+    sans-serif;
+  --font-geist-mono: "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular",
+    "Menlo", monospace;
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -122,6 +126,15 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
   }
 }
 

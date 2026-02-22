@@ -9,8 +9,13 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as cards from "../cards.js";
+import type * as columns from "../columns.js";
+import type * as crons from "../crons.js";
 import type * as http from "../http.js";
-import type * as myFunctions from "../myFunctions.js";
+import type * as kanbanTypes from "../kanbanTypes.js";
+import type * as projects from "../projects.js";
+import type * as resets from "../resets.js";
 
 import type {
   ApiFromModules,
@@ -20,8 +25,13 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  cards: typeof cards;
+  columns: typeof columns;
+  crons: typeof crons;
   http: typeof http;
-  myFunctions: typeof myFunctions;
+  kanbanTypes: typeof kanbanTypes;
+  projects: typeof projects;
+  resets: typeof resets;
 }>;
 
 /**
