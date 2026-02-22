@@ -15,7 +15,12 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { ProjectDoc, SortMode } from "./types";
 
@@ -90,16 +95,29 @@ export default function BoardToolbar({
               <CardTitle>Project</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Select
-                value={selectedProjectId ?? ""}
-                onChange={(event) => onSelectProject(event.target.value as Id<"projects">)}
-              >
-                {projects.map((entry) => (
-                  <option key={entry._id} value={entry._id}>
-                    {entry.name}
-                  </option>
-                ))}
-              </Select>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between">
+                    <span className="truncate">{project.name}</span>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-72">
+                  {projects.map((entry) => {
+                    const isActive = entry._id === selectedProjectId;
+                    return (
+                      <DropdownMenuItem
+                        key={entry._id}
+                        onClick={() => onSelectProject(entry._id)}
+                        className={cn("justify-between", isActive && "border-border")}
+                      >
+                        <span className="truncate">{entry.name}</span>
+                        {isActive ? <Badge variant="accent">Active</Badge> : null}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <div className="flex gap-2">
                 <Button size="sm" onClick={onCreateProject}>
                   New

@@ -9,7 +9,6 @@ import CardEditorDialog from "@/components/kanban/CardEditorDialog";
 import ColumnEditorDialog from "@/components/kanban/ColumnEditorDialog";
 import KanbanBoard from "@/components/kanban/KanbanBoard";
 import { Button } from "@/components/ui/button";
-import { Marquee } from "@/components/ui/marquee";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import type { CardDoc, CardDraft, ColumnDoc, SortMode } from "@/components/kanban/types";

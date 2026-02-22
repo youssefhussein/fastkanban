@@ -5,7 +5,6 @@ import { PRIORITY_VALUES } from "@/convex/kanbanTypes";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import type { CardDraft } from "./types";
 
 type CardEditorDialogProps = {
@@ -100,18 +99,22 @@ export default function CardEditorDialog({
                 <label className="mb-1 block text-xs font-black uppercase tracking-wide text-zinc-700 dark:text-zinc-200">
                   Priority
                 </label>
-                <Select
-                  value={draft.priority}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, priority: event.target.value as CardDraft["priority"] }))
-                  }
-                >
-                  {PRIORITY_VALUES.map((priority) => (
-                    <option key={priority} value={priority}>
-                      {priority}
-                    </option>
-                  ))}
-                </Select>
+                <div className="flex flex-wrap gap-2">
+                  {PRIORITY_VALUES.map((priority) => {
+                    const selected = draft.priority === priority;
+                    return (
+                      <Button
+                        key={priority}
+                        type="button"
+                        variant={selected ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setDraft((current) => ({ ...current, priority }))}
+                      >
+                        {priority}
+                      </Button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
