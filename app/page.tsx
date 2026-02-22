@@ -1,8 +1,8 @@
 "use client";
 
 import { useAuthActions } from "@convex-dev/auth/react";
-import { useMutation, useQuery } from "convex/react";
-import { useRouter } from "next/navigation";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { redirect, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import BoardToolbar from "@/components/kanban/BoardToolbar";
 import CardEditorDialog from "@/components/kanban/CardEditorDialog";
@@ -73,8 +73,11 @@ const THEME_STORAGE_KEY = "fastkanban-theme";
 export default function Home() {
   const router = useRouter();
   const { signOut } = useAuthActions();
+  const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
-  const projects = useQuery(api.projects.listMyProjects);
+  const shouldSkipProjectQuery = isAuthLoading || isSigningOut || !isAuthenticated;
+  const projects = useQuery(api.projects.listMyProjects, shouldSkipProjectQuery ? "skip" : {});
   const [selectedProjectId, setSelectedProjectId] = useState<Id<"projects"> | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("manual");
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -268,12 +271,25 @@ export default function Home() {
   };
 
   const handleSignOut = () => {
-    void signOut().then(() => {
-      router.push("/signin");
-    });
+    setIsSigningOut(true);
+    setErrorMessage(null);
+    void (async () => {
+      try {
+        await signOut();
+        router.replace("/signin");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Sign out failed.";
+        setErrorMessage(message);
+        setIsSigningOut(false);
+      }
+    })();
   };
 
-  if (projects === undefined) {
+  if (!isAuthLoading && !isSigningOut && !isAuthenticated) {
+    redirect("/signin");
+  }
+
+  if (isAuthLoading || isSigningOut || !isAuthenticated || projects === undefined) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#f8f3e7] text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
         <p className="animate-pulse text-sm font-black uppercase tracking-[0.2em] text-zinc-700 dark:text-zinc-300">

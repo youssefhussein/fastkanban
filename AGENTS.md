@@ -24,8 +24,9 @@ Use `pnpm` (lockfile is `pnpm-lock.yaml`).
 - App routes: lowercase folder names under `app/`.
 - Convex: keep validators explicit and avoid unsafe casts.
 - Avoid `any` and `unknown` in application code.
+- Avoid `useEffect()` as much as possible.
 
-Linting uses Next.js core-web-vitals + TypeScript + Convex recommended configs. Prettier is present with default config.
+Linting uses Next.js core-web-vitals + TypeScript + Convex recommended configs (found in .cursor/rules/convex_rules.mdc ). Prettier is present with default config.
 
 ## Testing Guidelines
 There is no dedicated test suite yet. Current quality gate is:
